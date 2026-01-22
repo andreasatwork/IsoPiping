@@ -1,4 +1,5 @@
 import pygame
+import math
 
 class Canvas:
     def __init__(self, width, height):
@@ -8,84 +9,69 @@ class Canvas:
         self.offset_x = 0
         self.offset_y = 0
         
-        # Internal list of entities to draw (for now just lines)
-        self.entities = []
-        
-        # Grid settings
         self.show_grid = True
-        self.grid_size = 50
+        self.grid_size = 100
 
-    def world_to_screen(self, x, y):
-        screen_x = int((x * self.zoom) + self.offset_x + self.width / 2)
-        screen_y = int((-y * self.zoom) + self.offset_y + self.height / 2) # Y up convention
+    def world_to_screen(self, x, y, z=0):
+        # Isometric projection
+        # Standard iso view: X and Z axes are at 30 degrees to the horizontal
+        # x_screen = (x - z) * cos(30)
+        # y_screen = (x + z) * sin(30) - y
+        cos30 = math.cos(math.radians(30))
+        sin30 = math.sin(math.radians(30))
+        
+        iso_x = (x - z) * cos30
+        iso_y = (x + z) * sin30 - y
+        
+        screen_x = int((iso_x * self.zoom) + self.offset_x + self.width / 2)
+        screen_y = int((iso_y * self.zoom) + self.offset_y + self.height / 2)
         return screen_x, screen_y
-
-    def screen_to_world(self, sx, sy):
-        wx = (sx - self.offset_x - self.width / 2) / self.zoom
-        wy = -(sy - self.offset_y - self.height / 2) / self.zoom
-        return wx, wy
 
     def pan(self, dx, dy):
         self.offset_x += dx
         self.offset_y += dy
 
-    def adjust_zoom(self, factor, mouse_pos=None):
-        # Optional: Zoom towards mouse_pos or center
-        old_zoom = self.zoom
+    def adjust_zoom(self, factor):
         self.zoom *= factor
-        
-        # Keep zoom within reasonable bounds
         self.zoom = max(0.01, min(self.zoom, 100.0))
-        
-        # If we wanted to zoom towards a point (like mouse), we'd adjust offsets here
-        # For now, let's keep it simple: zooming towards the center of the viewport
 
-    def draw(self, surface):
-        surface.fill((30, 30, 30)) # Dark background
+    def draw(self, surface, system, ghost=None):
+        surface.fill((30, 30, 30))
         
         if self.show_grid:
-            self._draw_grid(surface)
+            self._draw_iso_grid(surface)
             
-        # Draw entities
-        for entity in self.entities:
-            if entity['type'] == 'line':
-                p1 = self.world_to_screen(*entity['p1'])
-                p2 = self.world_to_screen(*entity['p2'])
-                pygame.draw.line(surface, entity['color'], p1, p2, 2)
+        # Draw system elements
+        for element in system.elements:
+            self._draw_element(surface, element, (200, 200, 200))
 
-    def _draw_grid(self, surface):
-        grid_color = (60, 60, 60)
-        
-        # Calculate view bounds in world coordinates
-        x_min, y_max = self.screen_to_world(0, 0)
-        x_max, y_min = self.screen_to_world(self.width, self.height)
-        
-        # Dynamic grid spacing based on zoom
-        effective_grid = self.grid_size
-        while effective_grid * self.zoom < 20:
-            effective_grid *= 2
-        while effective_grid * self.zoom > 200:
-            effective_grid /= 2
-            
-        start_x = (x_min // effective_grid) * effective_grid
-        end_x = (x_max // effective_grid + 1) * effective_grid
-        
-        start_y = (y_min // effective_grid) * effective_grid
-        end_y = (y_max // effective_grid + 1) * effective_grid
-        
-        curr_x = start_x
-        while curr_x <= end_x:
-            p1 = self.world_to_screen(curr_x, start_y)
-            p2 = self.world_to_screen(curr_x, end_y)
-            pygame.draw.line(surface, grid_color, p1, p2, 1)
-            curr_x += effective_grid
-            
-        curr_y = start_y
-        while curr_y <= end_y:
-            p1 = self.world_to_screen(start_x, curr_y)
-            p2 = self.world_to_screen(end_x, curr_y)
-            pygame.draw.line(surface, grid_color, p1, p2, 1)
-            curr_y += effective_grid
+        # Draw ghost element
+        if ghost:
+            self._draw_element(surface, ghost, (255, 255, 0)) # Yellow for ghost
 
-    def add_line(self, p1, p2, color=(200, 200, 200)):
-        self.entities.append({'type': 'line', 'p1': p1, 'p2': p2, 'color': color})
+        # Draw anchor flange (red dot)
+        anchor_pos = self.world_to_screen(*system.current_flange.pos.to_tuple())
+        pygame.draw.circle(surface, (255, 0, 0), anchor_pos, 5)
+
+    def _draw_element(self, surface, element, color):
+        for p1, p2 in element.get_lines():
+            sp1 = self.world_to_screen(*p1)
+            sp2 = self.world_to_screen(*p2)
+            pygame.draw.line(surface, color, sp1, sp2, 2)
+
+    def _draw_iso_grid(self, surface):
+        grid_color = (50, 50, 50)
+        steps = 10
+        size = self.grid_size * steps
+        
+        for i in range(-steps, steps + 1):
+            val = i * self.grid_size
+            # X lines
+            p1 = self.world_to_screen(-size, 0, val)
+            p2 = self.world_to_screen(size, 0, val)
+            pygame.draw.line(surface, grid_color, p1, p2, 1)
+            
+            # Z lines
+            p1 = self.world_to_screen(val, 0, -size)
+            p2 = self.world_to_screen(val, 0, size)
+            pygame.draw.line(surface, grid_color, p1, p2, 1)

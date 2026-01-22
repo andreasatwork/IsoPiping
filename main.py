@@ -2,6 +2,7 @@ import pygame
 import sys
 from canvas import Canvas
 from input_handler import InputHandler
+from model import PipingSystem, Vector3, Pipe, Elbow90, Flange
 
 def main():
     pygame.init()
@@ -11,42 +12,38 @@ def main():
     FPS = 60
     
     screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.DOUBLEBUF | pygame.RESIZABLE)
-    pygame.display.set_caption("IsoPiping")
+    pygame.display.set_caption("IsoPiping 3D")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Consolas", 24)
+    font = pygame.font.SysFont("Consolas", 18)
     
     canvas = Canvas(WIDTH, HEIGHT)
     input_handler = InputHandler()
+    system = PipingSystem()
     
-    # Simple command processor
-    def process_command(cmd):
-        print(f"Executing command: {cmd}")
-        parts = cmd.split()
-        if not parts: return
-        
-        action = parts[0].lower()
-        if action == "line" and len(parts) >= 5:
-            try:
-                x1, y1 = float(parts[1]), float(parts[2])
-                x2, y2 = float(parts[3]), float(parts[4])
-                canvas.add_line((x1, y1), (x2, y2))
-            except ValueError:
-                print("Invalid coordinates")
-        elif action == "clear":
-            canvas.entities = []
-        elif action == "exit" or action == "quit":
-            pygame.quit()
-            sys.exit()
+    # State for insertion
+    directions = [
+        Vector3(1, 0, 0), Vector3(-1, 0, 0),
+        Vector3(0, 1, 0), Vector3(0, -1, 0),
+        Vector3(0, 0, 1), Vector3(0, 0, -1)
+    ]
+    dir_names = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+    
+    state = {
+        'dir_idx': 0,
+        'type_idx': 0, # 0: Pipe, 1: Elbow
+    }
 
-    input_handler.command_callback = process_command
-    
-    # Add some initial geometry for testing
-    canvas.add_line((-100, 0), (100, 0), color=(255, 0, 0)) # X axis
-    canvas.add_line((0, -100), (0, 100), color=(0, 255, 0)) # Y axis
-    canvas.add_line((-50, -50), (50, 50), color=(0, 0, 255))
+    def get_ghost():
+        target_dir = directions[state['dir_idx']]
+        if state['type_idx'] == 0:
+            return Pipe(system.current_flange, 100)
+        else:
+            return Elbow90(system.current_flange, target_dir)
 
     running = True
     while running:
+        ghost = get_ghost()
+        
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -54,16 +51,29 @@ def main():
                 WIDTH, HEIGHT = event.size
                 canvas.width, canvas.height = WIDTH, HEIGHT
             
-            input_handler.handle_event(event, canvas)
+            result = input_handler.handle_event(event, canvas, state)
+            
+            if result == "COMMIT":
+                if state['type_idx'] == 0:
+                    system.add_pipe(100)
+                else:
+                    system.add_elbow(directions[state['dir_idx']])
 
         # Draw
-        canvas.draw(screen)
+        canvas.draw(screen, system, ghost)
         input_handler.draw_terminal(screen, font)
         
-        # Helpful info
-        info_text = f"Zoom: {canvas.zoom:.2f} | Pan: ({int(canvas.offset_x)}, {int(canvas.offset_y)})"
-        info_surface = font.render(info_text, True, (150, 150, 150))
+        # Info overlay
+        type_str = "Pipe" if state['type_idx'] == 0 else "Elbow-90"
+        dir_str = dir_names[state['dir_idx']]
+        info_text = f"Mode: {type_str} | Target: {dir_str} | Zoom: {canvas.zoom:.2f}"
+        info_surface = font.render(info_text, True, (200, 200, 200))
         screen.blit(info_surface, (10, 10))
+        
+        # Shortcuts help
+        help_text = "Shift+Arrows: Change Type/Dir | Enter: Insert | Arrows: Pan | +/-: Zoom"
+        help_surface = font.render(help_text, True, (150, 150, 150))
+        screen.blit(help_surface, (10, HEIGHT - 30))
         
         pygame.display.flip()
         clock.tick(FPS)
